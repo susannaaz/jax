@@ -208,8 +208,7 @@ def xla_computation(fun: Callable,
                     static_argnums: Union[int, Iterable[int]] = (),
                     axis_env: Optional[Sequence[Tuple[AxisName, int]]] = None,
                     backend: Optional[str] = None,
-                    tuple_args: bool = False,
-                    instantiate_const_outputs: bool = True) -> Callable:
+                    tuple_args: bool = False) -> Callable:
   """Creates a function that produces its XLA computation given example args.
 
   Args:
@@ -226,13 +225,6 @@ def xla_computation(fun: Callable,
     tuple_args: Optional bool, defaults to False. If True, the resulting XLA
       computation will have a single tuple argument that is unpacked into the
       specified function arguments.
-    instantiate_const_outputs: Optional bool, defaults to True. If False, then
-      ``xla_computation`` does not instantiate constant-valued outputs in the
-      XLA computation, and so the result is closer to the computation that
-      ``jax.jit`` produces and may be more useful for studying ``jit`` behavior.
-      If True, then constant-valued outputs are instantiated in the XLA
-      computation, which may be more useful for staging computations out of JAX
-      entirely.
 
   Returns:
     A wrapped version of ``fun`` that when applied to example arguments returns a
@@ -301,11 +293,11 @@ def xla_computation(fun: Callable,
 
   def make_axis_env(nreps):
     if axis_env is None:
-      return xla.AxisEnv(nreps)
+      return xla.AxisEnv(nreps, (), (), None)
     else:
       nreps = nreps * prod(size for name, size in axis_env)
       names, sizes = zip(*axis_env)
-      return xla.AxisEnv(nreps, names, sizes)
+      return xla.AxisEnv(nreps, names, sizes, None)
 
   def abstractify(x):
     return ShapedArray(onp.shape(x), dtypes.result_type(x))
@@ -321,10 +313,7 @@ def xla_computation(fun: Callable,
     jax_args, in_tree = tree_flatten((args, kwargs))
     jaxtree_fun, out_tree = flatten_fun(wrapped, in_tree)
     avals = map(abstractify, jax_args)
-    pvals = [pe.PartialVal.unknown(aval) for aval in avals]
-    jaxpr, _, consts = pe.trace_to_jaxpr(jaxtree_fun, pvals,
-                                         instantiate=instantiate_const_outputs,
-                                         stage_out=True)
+    jaxpr, _, consts = pe.trace_to_jaxpr2(jaxtree_fun, avals)
     jaxpr, _ = xla.apply_outfeed_rewriter(jaxpr)
     axis_env_ = make_axis_env(xla.jaxpr_replicas(jaxpr))
     c = xb.make_computation_builder('xla_computation_{}'.format(fun_name))
@@ -1535,10 +1524,6 @@ def make_jaxpr(fun: Callable,
   if isinstance(static_argnums, int):
     static_argnums = (static_argnums,)
 
-  def pv_like(x):
-    aval = xla.abstractify(x)
-    return pe.PartialVal.unknown(aval)
-
   @wraps(fun)
   def jaxpr_maker(*args, **kwargs):
     wrapped = lu.wrap_init(fun)
@@ -1549,11 +1534,9 @@ def make_jaxpr(fun: Callable,
       dyn_args = args
     jax_args, in_tree = tree_flatten((args, kwargs))
     jaxtree_fun, out_tree = flatten_fun(wrapped, in_tree)
-    in_pvals = map(pv_like, jax_args)
-    jaxpr, out_pvals, consts = pe.trace_to_jaxpr(
-        jaxtree_fun, in_pvals, instantiate=True, stage_out=True)
-    out_avals = map(raise_to_shaped, unzip2(out_pvals)[0])
-    in_avals = tuple(raise_to_shaped(in_aval) for in_aval, _ in in_pvals)
+    in_avals = map(xla.abstractify, jax_args)
+    jaxpr, out_avals, consts = pe.trace_to_jaxpr2(jaxtree_fun, in_avals)
+    in_avals = tuple(raise_to_shaped(in_aval) for in_aval in in_avals)
     typed_jaxpr = core.TypedJaxpr(jaxpr, consts, in_avals, out_avals)
     return typed_jaxpr
 
@@ -1583,7 +1566,7 @@ def device_put(x, device: Optional[xc.Device] = None):
 
 # TODO(mattjj): consider revising
 def _device_get(x):
-  if isinstance(x, core.Tracer):
+  if isinstance(x, core.TracerBase):
     return x
   return x.copy()
 
@@ -1598,7 +1581,7 @@ def device_get(x):
 
 def _check_args(args):
   for arg in args:
-    if not (isinstance(arg, core.Tracer) or _valid_jaxtype(arg)):
+    if not (isinstance(arg, core.TracerBase) or _valid_jaxtype(arg)):
       raise TypeError("Argument '{}' of type {} is not a valid JAX type"
                       .format(arg, type(arg)))
 

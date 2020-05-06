@@ -3908,7 +3908,7 @@ _scalar_types = (int, float, complex, onp.generic)
 def _defer_to_unrecognized_arg(binary_op):
   # Ensure that other array types have the chance to override arithmetic.
   def deferring_binary_op(self, other):
-    if not isinstance(other, _scalar_types + _arraylike_types + (core.Tracer,)):
+    if not isinstance(other, _scalar_types + _arraylike_types + (core.TracerBase,)):
       return NotImplemented
     return binary_op(self, other)
   return deferring_binary_op

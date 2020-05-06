@@ -54,8 +54,9 @@ _map = safe_map
 zip = safe_zip
 _reduce = functools.reduce
 
-
-@cache()
+# TODO caching doens't work well with trace object id test in
+# JaxprTrace2.full_raise. is just level (depth) of stagers okay?
+# @cache()
 def _initial_style_jaxpr(fun: Callable, in_tree, in_avals):
   in_pvals = [pe.PartialVal.unknown(aval) for aval in in_avals]
   wrapped_fun, out_tree = flatten_fun_nokwargs(lu.wrap_init(fun), in_tree)
@@ -1231,9 +1232,7 @@ def _transpose_scan_jaxpr(num_res1, num_c, num_res2, jaxpr):
   return _make_typed_jaxpr(transposed, res1_avals + c_avals + b_avals + res2_avals)
 
 def _make_typed_jaxpr(traceable: lu.WrappedFun, in_avals: Sequence[core.AbstractValue]):
-  pvals = [pe.PartialVal.unknown(aval) for aval in in_avals]
-  jaxpr, pvals_out, consts = pe.trace_to_jaxpr(traceable, pvals, instantiate=True)
-  out_avals, _ = unzip2(pvals_out)
+  jaxpr, out_avals, consts = pe.trace_to_jaxpr2(traceable, in_avals)
   return core.TypedJaxpr(jaxpr, consts, in_avals, _map(raise_to_shaped, out_avals))
 
 

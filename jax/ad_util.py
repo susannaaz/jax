@@ -13,7 +13,8 @@
 # limitations under the License.
 
 
-from .core import (lattice_join, Primitive, Unit, unit, AbstractUnit,
+from jax import core
+from .core import (lattice_join, Primitive, Primitive, Unit, unit, AbstractUnit,
                    valid_jaxtype)
 from .tree_util import register_pytree_node
 from typing import Any, Dict
@@ -76,3 +77,14 @@ def _stop_gradient_impl(x):
 stop_gradient_p = Primitive('stop_gradient')
 stop_gradient_p.def_impl(_stop_gradient_impl)
 stop_gradient_p.def_abstract_eval(lambda x: x)
+
+# the stop_gradient primitive shouldn't be staged out for XLA compilation, so we
+# use a custom bind rule
+@stop_gradient_p.def_custom_bind
+def stop_gradient_bind(x):
+  top_trace = core.find_top_trace([x])
+  if top_trace is None:
+    return x
+  else:
+    out_tracer = top_trace.process_primitive(stop_gradient_p, (x,), {})
+    return core.full_lower(out_tracer)

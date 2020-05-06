@@ -1199,19 +1199,8 @@ def top_k(operand: Array, k: int) -> Tuple[Array, Array]:
   return top_k_p.bind(operand, k=k)
 
 def tie_in(x: Array, y: Array) -> Array:
-  """Gives ``y`` a fake data dependence on ``x``.
-
-  When staging to XLA (e.g. running under jit or pmap), values that don't depend
-  on computation inputs are computed op-by-op, and folded into the XLA
-  computation as constants.
-
-  ``tie_in`` provides a way to explicitly stage values into the computation.
-  When staging to XLA and ``x`` is already staged, then the result of ``tie_in``
-  is ``y``, but staged to XLA. Downstream use of the result will also be staged
-  to XLA.
-  """
-  return tie_in_p.bind(x, y)
-
+  """Deprecated. Ignores ``x`` and returns ``y``."""
+  return y
 
 def full(shape: Shape, fill_value: Array, dtype: Optional[DType] = None) -> Array:
   """Returns an array of `shape` filled with `fill_value`.
@@ -3818,7 +3807,7 @@ def _reduce_batch_rule(batched_args, batch_dims, *, computation, jaxpr, consts,
 
 def _reduction_computation(c, jaxpr, consts, init_value):
   shape = c.GetShape(init_value)
-  axis_env = xla.AxisEnv(1)  # no parallel primitives inside reductions
+  axis_env = xla.AxisEnv(1, (), (), None)  # no parallel primitives inside reductions
   subc = xla_bridge.make_computation_builder("reduction_computation")
   assert len(consts) == 0, "Reduction computations cannot have constants"
   args = [xb.parameter(subc, 0, shape), xb.parameter(subc, 1, shape)]
@@ -4705,22 +4694,6 @@ xla.translations[top_k_p] = partial(standard_translate, 'top_k')
 ad.primitive_jvps[top_k_p] = _top_k_jvp
 batching.primitive_batchers[top_k_p] = _top_k_batch_rule
 
-def _tie_in_transpose_rule(t):
-  return [ad_util.zero, t]
-
-def _tie_in_batch_rule(batched_args, batch_dims):
-  y = tie_in(*batched_args)
-  _, bdim_y = batch_dims
-  return y, bdim_y
-
-tie_in_p = Primitive('tie_in')
-tie_in_p.def_impl(lambda x, y: y)
-tie_in_p.def_abstract_eval(lambda x, y: raise_to_shaped(y))
-xla.translations[tie_in_p] = lambda c, x, y: y
-ad.deflinear(tie_in_p, _tie_in_transpose_rule)
-batching.primitive_batchers[tie_in_p] = _tie_in_batch_rule
-masking.masking_rules[tie_in_p] = lambda vals, logical_shapes: vals[1]
-
 
 def _stop_gradient_jvp_rule(primals, tangents):
   # if we don't call stop_gradient here, we'd only peel off one autodiff tracer
@@ -4732,7 +4705,6 @@ def _stop_gradient_batch_rule(batched_args, batch_dims):
   dim, = batch_dims
   return stop_gradient(x), dim
 
-xla.translations[ad_util.stop_gradient_p] = lambda c, x: x
 ad.primitive_jvps[ad_util.stop_gradient_p] = _stop_gradient_jvp_rule
 batching.primitive_batchers[ad_util.stop_gradient_p] = _stop_gradient_batch_rule
 
