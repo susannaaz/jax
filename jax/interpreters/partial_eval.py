@@ -858,8 +858,7 @@ class JaxprExecutor(core.Executor):
       self.eqns.append(eqn)
       return out_tracers
     else:
-      breakpoint()
-      # TODO breaks remat in scan (but not custom_jvp/vjp!)
+      # TODO TODO breaks remat in scan (but not custom_jvp/vjp!)
       # options
       #  * do the initial_style_staging trick with remat (and advise others not
       #    to use final-style calls, w/o using this trick?)

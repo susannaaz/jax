@@ -28,7 +28,10 @@ jaxval_adders = {}
 jaxval_adders[Unit] = lambda _, __: unit
 
 def add_jaxvals(x, y):
-  return add_jaxvals_p.bind(x, y)
+  if core.get_aval(x) is core.get_aval(y) is core.abstract_unit:
+    return core.unit
+  else:
+    return add_jaxvals_p.bind(x, y)
 
 add_jaxvals_p = Primitive('add_any')
 
